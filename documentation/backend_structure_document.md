@@ -1,179 +1,185 @@
 # Backend Structure Document
 
-This document outlines the backend architecture, hosting, and infrastructure for the **codeguide-starter** project. It uses plain language so anyone can understand how the backend is set up and how it supports the application.
+This document outlines the backend architecture, hosting, infrastructure, and related components of the `same-ai-cloud-starter` project—an AI-powered, registration-free Cloud IDE with conversational coding support. It is written in everyday language to ensure clarity for readers of all technical backgrounds.
 
 ## 1. Backend Architecture
 
-- **Framework and Design Pattern**
-  - We use **Next.js API Routes** to handle all server-side logic. These routes live alongside the frontend code in the same repository, making development and deployment simpler.
-  - The backend follows a **layered pattern**:
-    1. **API Layer**: Receives requests (login, registration, data fetch).  
-    2. **Service Layer**: Contains the core business logic (user validation, password hashing).  
-    3. **Data Access Layer**: Talks to the database via a simple ORM (e.g., Prisma or TypeORM).
+- **Framework & Design Patterns**
+  - Built on **Next.js** (App Router) for a unified frontend and backend codebase.  
+  - Serverless-style **API routes** handle incoming requests without a separate web server.  
+  - **Monorepo-like structure**: keeps UI, API routes, and AI logic in one repository for easy sharing of types and utilities.
+  - **Orchestrator pattern**: a central `agent/orchestrator` module interprets user commands and delegates work to specialized “tools.”
 
 - **Scalability**
-  - Stateless API routes can scale horizontally—new instances can spin up on demand.  
-  - We can add caching or a message queue (e.g., Redis or RabbitMQ) without changing the core code.
+  - Stateless API routes mean you can deploy multiple instances behind a load balancer and scale horizontally.  
+  - Each user gets their own Docker-based sandbox, isolating workloads and balancing container resources independently.  
+  - Database connections managed through a pool (via Drizzle ORM) to support many concurrent requests.
 
-- **Maintainability**
-  - Code for each feature is grouped by route (authentication, dashboard).  
-  - A service layer separates complex logic from request handling.
-
-- **Performance**
-  - Lightweight Node.js handlers keep response times low.  
-  - Future use of database connection pooling and Redis for caching repeated queries.
+- **Maintainability & Performance**
+  - Modular `agent/tools` directory separates concerns—each tool (file operations, shell commands, web search) lives in its own file.  
+  - TypeScript everywhere ensures consistent types between frontend, API, and AI logic.  
+  - Docker Compose for local development mirrors production container setups, reducing “works on my machine” issues.  
+  - Environment variables drive configuration (API keys, database URL), keeping secrets out of source code.
 
 ## 2. Database Management
 
-- **Database Choice**
-  - We recommend **PostgreSQL** for structured data and reliable transactions.  
-  - In-memory caching can be added later with **Redis** for session tokens or frequently read data.
+- **Technology Stack**
+  - PostgreSQL (SQL relational database) for storing user data, project snapshots, and session info.  
+  - Drizzle ORM for type-safe database queries in TypeScript.
 
-- **Data Storage and Access**
-  - Use an ORM like **Prisma** or **TypeORM** to map JavaScript/TypeScript objects to database tables.
-  - Connection pooling ensures efficient use of database connections under load.
-  - Migrations track schema changes over time, keeping development, staging, and production in sync.
-
-- **Data Practices**
-  - Passwords are never stored in plain text—they are salted and hashed with **bcrypt** before saving.
-  - All outgoing data is typed and validated to prevent malformed records.
+- **Data Handling**
+  - **Connection pooling**: maintains a small pool of active connections to handle bursts of traffic.  
+  - **Migrations**: version-controlled SQL migrations keep the schema in sync across environments.  
+  - **Backups & Retention**: daily automated backups stored offsite; retention policy of 30 days.  
+  - **Data Access Patterns**:  
+    - Read-heavy for loading snapshots and project lists.  
+    - Write operations when users trigger snapshots, create sessions, or update metadata.
 
 ## 3. Database Schema
 
-### Human-Readable Format
+_Human-readable tables overview and SQL schema for PostgreSQL_
 
-- **Users**
-  - **id**: Unique identifier  
-  - **email**: User’s email address (unique)  
-  - **password_hash**: Securely hashed password  
-  - **created_at**: Account creation timestamp
-
-- **Sessions**
-  - **id**: Unique session record  
-  - **user_id**: Links to a user  
-  - **token**: Random string for authentication  
-  - **expires_at**: When the token stops working  
-  - **created_at**: When the session was created
-
-- **DashboardItems** *(optional for dynamic data)*
-  - **id**: Unique record  
-  - **title**: Item title  
-  - **content**: Item details  
-  - **created_at**: When the item was added
+### Tables Overview
+- **users**: registered users (optional).  
+- **sessions**: tracks user sessions and assigned container IDs.  
+- **containers**: lifecycle info for each sandbox container.  
+- **project_snapshots**: metadata about saved project states.  
 
 ### SQL Schema (PostgreSQL)
 ```sql
--- Users table
 CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email          TEXT UNIQUE NOT NULL,
+  name           TEXT,
+  created_at     TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- Sessions table
 CREATE TABLE sessions (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE CASCADE,
-  token VARCHAR(255) UNIQUE NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID REFERENCES users(id) ON DELETE CASCADE,
+  container_id   TEXT NOT NULL,
+  created_at     TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  expires_at     TIMESTAMP WITH TIME ZONE
 );
 
--- Dashboard items table
-CREATE TABLE dashboard_items (
-  id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE containers (
+  id             TEXT PRIMARY KEY,
+  session_id     UUID REFERENCES sessions(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL,    -- e.g., 'starting', 'running', 'stopped'
+  created_at     TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at     TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
-```  
+
+CREATE TABLE project_snapshots (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID REFERENCES users(id) ON DELETE SET NULL,
+  name           TEXT NOT NULL,
+  data_path      TEXT NOT NULL,    -- location in object storage or filesystem
+  created_at     TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+``` 
 
 ## 4. API Design and Endpoints
 
-- **Approach**: We follow a **RESTful** style, grouping related endpoints under `/api` directories.
+- **Approach**: RESTful Next.js API routes that return JSON. Real-time streaming via WebSockets or Server-Sent Events for long-running operations.
 
 - **Key Endpoints**
-  - `POST /api/auth/register`  
-    • Accepts `{ email, password }`  
-    • Creates a new user and issues a session token  
-  - `POST /api/auth/login`  
-    • Accepts `{ email, password }`  
-    • Verifies credentials and returns a session token  
-  - `POST /api/auth/logout`  
-    • Invalidates the session token on the server  
-  - `GET /api/dashboard/data`  
-    • Requires a valid session  
-    • Returns user-specific data or dashboard items  
+  - `POST /api/auth/[...auth]`  
+    - Handles optional user sign-in/sign-up with providers (GitHub, email).  
+  - `POST /api/agent`  
+    - Receives user chat commands, identifies session, and forwards to the AI orchestrator.  
+  - `GET /api/agent/stream`  
+    - Upgrades to WebSocket/SSE to stream AI responses and container output in real time.  
+  - `POST /api/snapshots`  
+    - Triggers a project snapshot; returns snapshot ID and metadata.  
+  - `GET /api/snapshots`  
+    - Lists a user’s saved snapshots.  
+  - `DELETE /api/sessions/:id`  
+    - Terminates a user session and tears down the associated container.
 
-- **Communication**
-  - Frontend sends JSON requests; backend replies with JSON and appropriate HTTP status codes.  
-  - Protected routes check for a valid session token (in cookies or Authorization header).
+- **Communication Flow**
+  1. UI calls `/api/agent` with a command.  
+  2. API route page extracts user/session info, invokes orchestrator.  
+  3. Orchestrator loads the right tool, calls container management service.  
+  4. Container runs the command (e.g., `docker exec`).  
+  5. Orchestrator streams back progress and final message via `/api/agent/stream`.
 
 ## 5. Hosting Solutions
 
-- **Cloud Provider**:  
-  - **Vercel** (recommended) offers seamless Next.js deployments, auto-scaling, and built-in CDN.  
-  - Alternatively, **Netlify** or any Node.js-capable host will work.
+- **Frontend & API**
+  - **Vercel**: auto-scales Next.js app globally, built-in CDN, free SSL certificates, easy environment management.  
+
+- **Sandbox Containers**
+  - **Docker Engine** on a managed VM cluster (e.g., AWS EC2 Auto Scaling Group or DigitalOcean droplets).
+  - Alternatively, **AWS ECS Fargate** for serverless container hosting (no VM management).  
+
+- **Database**
+  - **Managed PostgreSQL** service (e.g., AWS RDS, DigitalOcean Managed DB) for automated backups and failover.
 
 - **Benefits**
-  - **Reliability**: Global servers and failover across regions.  
-  - **Scalability**: Auto-scale serverless functions based on traffic.  
-  - **Cost-Effectiveness**: Pay-per-use model means low cost for small projects.
+  - **Reliability**: Vercel and managed DB services handle uptime and patching.  
+  - **Scalability**: containers spawn on demand; Next.js scales with traffic.  
+  - **Cost-effectiveness**: pay-as-you-go pricing for compute and database.
 
 ## 6. Infrastructure Components
 
 - **Load Balancer**
-  - Provided by the hosting platform—distributes API requests across function instances.
+  - Automatically routes API and frontend requests to healthy Next.js instances on Vercel.
 
-- **CDN (Content Delivery Network)**
-  - Vercel’s global edge network caches static assets (CSS, JS, images) for faster page loads.
+- **Container Orchestration Service**
+  - Manages lifecycle of sandbox containers: create, monitor health, auto-remove idle containers.
 
 - **Caching**
-  - **Redis** (optional) for session storage or caching dashboard queries to reduce database load.
+  - **Redis** for session lookups and short-lived data (e.g., container routing tokens).  
 
-- **Object Storage**
-  - For file uploads or backups, integrate with AWS S3 or similar services.
+- **Content Delivery Network (CDN)**
+  - Vercel’s built-in CDN caches static assets (JS/CSS/images) at edge locations worldwide.
 
-- **Message Queue**
-  - In future, use **RabbitMQ** or **Kafka** for background tasks (e.g., email notifications).
+- **Reverse Proxy**
+  - Routes preview traffic from the client’s iframe to the correct container port based on session ID.
 
 ## 7. Security Measures
 
 - **Authentication & Authorization**
-  - Passwords hashed with **bcrypt** and salted.  
-  - Session tokens stored in secure, HttpOnly cookies or Authorization headers.  
-  - Protected endpoints verify tokens before proceeding.
+  - Next.js auth routes with JWT session tokens or NextAuth.  
+  - Role-based checks: only allow snapshot deletion or container termination by session owner.  
 
 - **Data Encryption**
-  - **HTTPS/TLS** encrypts data in transit.  
-  - Database connections use SSL to encrypt data between the app and the database.
+  - TLS for all in-transit data.  
+  - Managed database with at-rest encryption.
 
-- **Input Validation**
-  - Every incoming request is validated (e.g., valid email format, password length) to prevent SQL injection or other attacks.
+- **Container Isolation**
+  - Containers run as non-root users.  
+  - Curated allow-list of shell commands; all inputs sanitized.  
+  - No direct host filesystem mounts; code lives inside the container’s private FS.
 
-- **Web Security Best Practices**
-  - Enable **CORS** policies to limit allowed origins.  
-  - Use **CSRF tokens** or same-site cookies to prevent cross-site requests.  
-  - Set secure headers with **Helmet** or a similar middleware.
+- **Secrets Management**
+  - Environment variables stored securely in Vercel and VM secrets manager.  
+  - No secrets in source code or container images.
 
 ## 8. Monitoring and Maintenance
 
-- **Performance Monitoring**
-  - Integrate **Sentry** or **LogRocket** for real-time crash reporting and performance tracing.  
-  - Use Vercel’s built-in analytics to track request latencies and error rates.
+- **Monitoring Tools**
+  - **Sentry** or **Datadog** for error tracking in Next.js.  
+  - **Prometheus & Grafana** for container metrics: CPU, memory, network.  
+  - **Log aggregation** with **ELK Stack** (Elasticsearch, Logstash, Kibana) or a hosted solution.
 
-- **Logging**
-  - Structured logs (JSON) for all API requests and errors, shipped to a log management service like **Datadog** or **Logflare**.
+- **Alerts & Health Checks**
+  - Health probes on containers; automatically restart if unresponsive.  
+  - Alerts for high error rates, slow database queries, or container crashes.
 
-- **Health Checks**
-  - Define a `/health` endpoint that returns a 200 status if the service is up and the database is reachable.
-
-- **Maintenance Strategies**
-  - Automated migrations run on deploy to keep the database schema up to date.  
-  - Scheduled dependency audits and security scans (e.g., `npm audit`).
-  - Regular backups of the database (daily or weekly depending on usage).
+- **Maintenance**
+  - Automated database migrations on deploy.  
+  - Scheduled container image updates and vulnerability scans.  
+  - Regular backup validation and DR drills.
 
 ## 9. Conclusion and Overall Backend Summary
 
-The backend for **codeguide-starter** is built on Next.js API Routes and Node.js, paired with PostgreSQL for data and optional Redis for caching. It follows a clear layered architecture that keeps code easy to maintain and extend. With RESTful endpoints for authentication and data, secure practices like password hashing and HTTPS, and hosting on Vercel for scalability and global performance, this setup meets the project’s goals for a fast, secure, and developer-friendly foundation. Future enhancements—such as background job queues, advanced monitoring, or richer data models—can be added without disrupting the core structure.
+The `same-ai-cloud-starter` backend is a cohesive, extensible foundation for a real-time, AI-powered Cloud IDE. By combining Next.js API routes, container-based sandboxes, and a PostgreSQL + Drizzle data layer, it achieves:
+
+- **Scalability**: stateless services and on-demand containers scale to many users.  
+- **Maintainability**: modular code organization and TypeScript type safety reduce complexity.  
+- **Performance**: edge caching, load balancing, and container isolation ensure responsiveness.  
+- **Security**: robust authentication, data encryption, and container sandboxing protect user data.
+
+This architecture aligns with the project’s goals—offering a seamless, registration-free coding experience powered by AI—while being flexible enough to support future features like branching workflows, plugin integrations, and team collaboration.

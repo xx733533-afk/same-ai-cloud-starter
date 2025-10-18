@@ -1,14 +1,20 @@
 flowchart TD
-  Start[Landing Page]
-  SignUpPage[Sign Up Page]
-  SignInPage[Sign In Page]
-  AuthAPI[Authentication API Endpoint]
-  DashboardPage[Dashboard Page]
-  Start -->|Select Sign Up| SignUpPage
-  Start -->|Select Sign In| SignInPage
-  SignUpPage -->|Submit Credentials| AuthAPI
-  SignInPage -->|Submit Credentials| AuthAPI
-  AuthAPI -->|Success| DashboardPage
-  AuthAPI -->|Error| SignUpPage
-  AuthAPI -->|Error| SignInPage
-  DashboardPage -->|Click Logout| Start
+  Start[User opens Cloud IDE] --> ChatUI[Chat Interface]
+  Start --> Editor[File Explorer Editor]
+  Start --> PreviewPane[Live Preview Pane]
+  ChatUI --> SendCmd[Send command to api agent endpoint]
+  SendCmd --> AuthCheck{User registered}
+  AuthCheck -- Yes --> AuthService[Authenticate user optional]
+  AuthCheck -- No --> Orchestrator
+  AuthService --> Orchestrator
+  Orchestrator --> DecideTool{Select tool via AI model}
+  DecideTool -- edit file --> FileTool[Edit File tool]
+  DecideTool -- shell command --> ShellTool[Shell Command tool]
+  DecideTool -- web search --> SearchTool[Web Search tool]
+  FileTool --> ContainerMgr[Container Manager executes file op]
+  ShellTool --> ContainerMgr
+  SearchTool --> Orchestrator
+  ContainerMgr --> HotReload[Trigger hot reload]
+  HotReload --> PreviewPane
+  Orchestrator --> StreamResp[Stream AI response]
+  StreamResp --> ChatUI
