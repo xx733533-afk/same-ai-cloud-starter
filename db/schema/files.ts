@@ -2,7 +2,7 @@ import { pgTable, text, timestamp, boolean, uuid, varchar, integer } from "drizz
 
 export const projectFiles = pgTable("project_files", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull().references(() => import("./projects").then(m => m.projects.id), { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull(),
   path: text("path").notNull(),
   content: text("content"),
   size: integer("size").default(0).notNull(),
@@ -14,7 +14,7 @@ export const projectFiles = pgTable("project_files", {
 
 export const fileWatchers = pgTable("file_watchers", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull().references(() => import("./projects").then(m => m.projects.id), { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull(),
   path: text("path").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

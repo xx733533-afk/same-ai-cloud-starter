@@ -10,7 +10,7 @@ export const projects = pgTable("projects", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   lastAccessed: timestamp("last_accessed").defaultNow().notNull(),
   isDeleted: boolean("is_deleted").default(false).notNull(),
-  userId: text("user_id").references(() => import("./auth").then(m => m.user.id), { onDelete: "cascade" }),
+  userId: text("user_id"),
 });
 
 export const versions = pgTable("versions", {

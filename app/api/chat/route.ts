@@ -4,7 +4,6 @@ import { chatMessages } from '@/db/schema/chat-messages';
 import { projects } from '@/db/schema/projects';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { openai } from '@/lib/openai';
 
 const chatSchema = z.object({
   message: z.string().min(1).max(10000),
@@ -77,28 +76,34 @@ export async function POST(request: NextRequest) {
       });
     }
     
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: messages as any,
-      max_tokens: 2000,
-      temperature: 0.7,
-      stream: true,
-    });
-    
+    // Mock AI response for now (replace with actual AI integration later)
+    const mockResponse = `I understand you're working on a ${validatedData.project_id ? 'project' : 'general coding task'}. Here's how I can help you:
+
+1. **Code Generation**: I can help you write code in various languages and frameworks
+2. **Debugging**: I can help identify and fix bugs in your code
+3. **Code Review**: I can review your code and suggest improvements
+4. **Architecture**: I can help design system architecture and patterns
+5. **Best Practices**: I can guide you on coding best practices and conventions
+
+What specific help do you need with your code?`;
+
     // Create response stream
     const stream = new ReadableStream({
       async start(controller) {
         let assistantContent = '';
         
-        for await (const chunk of completion) {
-          const content = chunk.choices[0]?.delta?.content || '';
-          if (content) {
-            assistantContent += content;
-            controller.enqueue(
-              new TextEncoder().encode(`data: ${JSON.stringify({ content, type: 'content' })}\n\n`)
-            );
-          }
+        // Simulate streaming response
+        const words = mockResponse.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const word = words[i] + (i < words.length - 1 ? ' ' : '');
+          assistantContent += word;
+          
+          controller.enqueue(
+            new TextEncoder().encode(`data: ${JSON.stringify({ content: word, type: 'content' })}\n\n`)
+          );
+          
+          // Simulate typing delay
+          await new Promise(resolve => setTimeout(resolve, 50));
         }
         
         // Save assistant message

@@ -13,7 +13,7 @@ export const aiTools = pgTable("ai_tools", {
 
 export const toolExecutions = pgTable("tool_executions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id").notNull().references(() => import("./projects").then(m => m.projects.id), { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull(),
   toolId: uuid("tool_id").notNull().references(() => aiTools.id, { onDelete: "cascade" }),
   parameters: jsonb("parameters").notNull(),
   result: jsonb("result"),
